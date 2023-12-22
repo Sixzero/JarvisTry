@@ -1,0 +1,5 @@
+pyaudio
+SpeechRecognition
+torch
+faster-whisper
+whisper
