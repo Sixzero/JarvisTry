@@ -1,7 +1,5 @@
 #%%
 from pathlib import Path
-from gtts import gTTS
-from io import BytesIO
 from openai import OpenAI
 import queue, os
 import threading
@@ -9,7 +7,8 @@ import subprocess
 import pyaudio
 import wave
 from time import time, sleep
-from pydiamonds.parallel_tools import run_in_thread
+from decorators import run_in_thread
+
 
 # Initialize OpenAI client
 client = OpenAI()
@@ -23,6 +22,8 @@ if 'initialized' not in globals():
 
 @run_in_thread
 def text_to_speech(text, lang='hu'):
+    # from gtts import gTTS
+    # from io import BytesIO
     # tts = gTTS(text=text, lang=lang, slow=False)
     # audio_buffer = BytesIO()
     # tts.write_to_fp(audio_buffer)
