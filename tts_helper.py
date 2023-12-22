@@ -5,7 +5,6 @@ import queue, os
 import threading
 import subprocess
 import pyaudio
-import wave
 from time import time, sleep
 from decorators import run_in_thread
 
@@ -135,21 +134,8 @@ def convert_mp3_to_wav(mp3_file_path, wav_file_path, speed=1.1):
     ffmpeg_cmd = ['ffmpeg', '-y', '-i', f"{mp3_file_path}", '-filter:a', f'atempo={speed}', f"{wav_file_path}"]
     # Run the ffmpeg command
     subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-# Example: Adding text data to the queue
-# text_queue.put("Ez egy példaszöveg.")
-# text_queue.put("Még egy szöveg.")
-# sleep(10)
 
-# text_to_speech("Write me about the meaning of life. Once in a far far away galaxy, there was a sith, who controlled how things work in life, and he shouted! JUST DO IT! JUST DO IT! JUST DO IT! JUST DO IT!")
-# text_to_speech("így beszélne az AI ha tudna a mobilon keresztül beszélni.")
-# text_to_speech("Mondjuk mondhatná ezt, vagy amire éppen szükségünk van.")
-# add_text2queue("Igen eléggé")
-# sleep(0.1)
-# add_text2queue("érdekes az akcentusa,")
-# sleep(0.1)
-# add_text2queue("viszont legalább tud beszélni.")
-import pyaudio
-import wave
+
 def list_audio_devices():
     p = pyaudio.PyAudio()
     for i in range(p.get_device_count()):
@@ -159,6 +145,20 @@ def list_audio_devices():
 
 
 if __name__ == "__main__":
+
+    # Example: Adding text data to the queue
+    # text_queue.put("Ez egy példaszöveg.")
+    # text_queue.put("Még egy szöveg.")
+    # sleep(10)
+
+    # text_to_speech("Write me about the meaning of life. Once in a far far away galaxy, there was a sith, who controlled how things work in life, and he shouted! JUST DO IT! JUST DO IT! JUST DO IT! JUST DO IT!")
+    # text_to_speech("így beszélne az AI ha tudna a mobilon keresztül beszélni.")
+    # text_to_speech("Mondjuk mondhatná ezt, vagy amire éppen szükségünk van.")
+    # add_text2queue("Igen eléggé")
+    # sleep(0.1)
+    # add_text2queue("érdekes az akcentusa,")
+    # sleep(0.1)
+    # add_text2queue("viszont legalább tud beszélni.")
     list_audio_devices()
     mp3_path = Path(__file__).parent / "voice" / f"speech_1703116391.68.mp3"
     wav_path = Path(__file__).parent / "voice" / f"speech_1703116391.68.wav"
