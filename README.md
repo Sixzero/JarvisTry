@@ -1,8 +1,8 @@
-# Jarvis LLM controlled with voice
+# LLM assistant controlled with voice called Jarvis.
 
 Using faster-whisper for voice to text translation. The host on which the script is ran can listen in discord rooms, this way anyone joining the room can speak to the host where they are. To use discord as microphone, 1. join to a discord room 2. Run `./mic_over_discord.sh` 3. Profit. This way you will be able to access discord room voice as az input device and can use it for any purpose. 
 
-# To start run:
+# To start:
 
 ```bash
 python3 main.py --record_timeout=0.5 --non_english --model=large-v
