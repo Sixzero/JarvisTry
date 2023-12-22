@@ -1,5 +1,6 @@
 
 from functools import wraps
+from threading import Thread
 
 def run_in_thread(func):
 	@wraps(func)
