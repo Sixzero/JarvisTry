@@ -1,15 +1,31 @@
 # LLM assistant controlled with voice called Jarvis.
 
-Using faster-whisper for voice to text translation. The host on which the script is ran can listen in discord rooms, this way anyone joining the room can speak to the host where they are. To use discord as microphone, 1. join to a discord room 2. Run `./mic_over_discord.sh` 3. Profit. This way you will be able to access discord room voice as az input device and can use it for any purpose. 
+The solution:
+
+1. Human voice from default microphone `pulse`
+2. Converting it to text. Currently with `whisperx` -> `speech` 
+3. Prompting a local LLM - for better latency and low cost - "If Jarvis was mentioned in the `speech` write yes." The path for local LLM: `/llms/gguf/dolphin-2.6-mistral-7b.Q5_K_M.gguf` (llm_assistant.py:10)
+4. If local LLM said yes, then ChatGPT steps in and answers the question of the user.
+5. We stream send the answer chunked by sentences to openAI TTS. We play the TTS.  
+
+The host on which the script is ran can listen in discord rooms, this way anyone joining the room can speak to the host over the internet. 
+To use discord as microphone:
+ 1. join to a discord room 
+ 2. Run `./mic_over_discord.sh` exposes discord channel as `pulse` default microphone. It will be available as an input device. 
+ 3. `main.py` will use `pulse` input device (microphone) automatically. 
 
 # To start:
 
+Set up your local LLM in `llm_assistant.py` on line 10: `llm = get_llm_model("/path/to/llamacpp_model-7b.Q4_K_M.gguf")`
+
+Then run:
+
 ```bash
-python3 main.py --record_timeout=0.5 --non_english --model=large-v
+python3 main.py --record_timeout=1.5 --non_english --model=large-v2
 ```
 
-Going to listen on first mic? I think so. Work in progress...
+Work in progress... Still no `requirements.txt` 
 
-A Local LLM is used to determine whether "Jarvis" should speak/answer anything (To be more realtime and decrease costs by not using ChatGPT for everything). If it should then we call out to chatGPT to answer the question. 
+## RAG first try done.
 
-Soon there will be a RAG connected so Jarvis will remember things you say to it.
+There is a RAG connected into the system, so it can remember things you mention to the system. 

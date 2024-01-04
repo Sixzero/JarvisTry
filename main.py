@@ -1,17 +1,17 @@
 import argparse
 import io, os
 import speech_recognition as sr
-import whisper
-import torch
-
+from pathlib import Path
 from datetime import datetime, timedelta
 from queue import Queue
 from tempfile import NamedTemporaryFile
 from time import sleep, time
 from sys import platform
-from faster_whisper import WhisperModel
 
-from llm_assistant import find_same_from_end, is_AI_called, stream_chatgpt
+from llm_assistant import find_same_from_end, is_AI_called, is_AI_called_Jarvis, stream_chatgpt, stream_chatgpt_single
+from speech_recorder import get_mic_source
+from stt_helper import get_record_callback, transcribe
+from tts_helper import add_text2queue, wait_for_speech_sleep
 
 
 def main():
@@ -43,41 +43,9 @@ def main():
                                  "Run this with 'list' to view available Microphones.", type=str)
     args = parser.parse_args()
     
-    # The last time a recording was retreived from the queue.
-    phrase_time = None
-    # Current raw audio bytes.
-    last_sample = []
-    sound_chunk_threshold = 30
-    last_text = ""
-    # Thread safe Queue for passing data from the threaded recording callback.
-    data_queue = Queue()
-    # We use SpeechRecognizer to record our audio because it has a nice feauture where it can detect when speech ends.
-    recorder = sr.Recognizer()
-    recorder.energy_threshold = args.energy_threshold
-    # Definitely do this, dynamic energy compensation lowers the energy threshold dramtically to a point where the SpeechRecognizer never stops recording.
-    recorder.dynamic_energy_threshold = False
-    
-    # Important for linux users. 
-    # Prevents permanent application hang and crash by using the wrong Microphone
-    if 'linux' in platform:
-        mic_name = args.default_microphone
-        if not mic_name or mic_name == 'list':
-            print("Available microphone devices are: ")
-            for index, name in enumerate(sr.Microphone.list_microphone_names()):
-                print(f"Microphone with name \"{name}\" found")   
-            return
-        else:
-            for index, name in enumerate(sr.Microphone.list_microphone_names()):
-                if mic_name in name:
-                    source = sr.Microphone(sample_rate=16000, device_index=index)
-                    break
-    else:
-        source = sr.Microphone(sample_rate=16000)
-    
+    model = args.model
     # if args.model == "large":
         # args.model = "large-v2"    
-    
-    model = args.model
     if args.model != "large-v2" and not args.non_english:
         model = model + ".en"
          
@@ -88,33 +56,37 @@ def main():
         compute_type = args.compute_type
     cpu_threads = args.threads
     
-    print('model:', model, device)
-    audio_model = WhisperModel(model, device = device, compute_type = compute_type , cpu_threads = cpu_threads)
+    # Current raw audio bytes.
+    last_sample = []
+
+    sound_chunk_threshold = 10
+    last_text = ""
+    # Thread safe Queue for passing data from the threaded recording callback.
+    data_queue = Queue()
+    # We use SpeechRecognizer to record our audio because it has a nice feauture where it can detect when speech ends.
+    recorder = sr.Recognizer()
+    recorder.energy_threshold = args.energy_threshold
+    # Definitely do this, dynamic energy compensation lowers the energy threshold dramtically to a point where the SpeechRecognizer never stops recording.
+    recorder.dynamic_energy_threshold = False
+    
+    source = get_mic_source(args.default_microphone)
     
     record_timeout = args.record_timeout
     phrase_timeout = args.phrase_timeout
 
-    temp_file = NamedTemporaryFile().name 
-    transcription = ['']
-    
     with source:
         recorder.adjust_for_ambient_noise(source)
 
-    def record_callback(_, audio:sr.AudioData) -> None:
-        """
-        Threaded callback function to recieve audio data when recordings finish.
-        audio: An AudioData containing the recorded bytes.
-        """
-        # Grab the raw bytes and push it into the thread safe queue.
-        data = audio.get_raw_data()
-        data_queue.put(data)
-
     # Create a background thread that will pass us raw audio bytes.
     # We could do this manually but SpeechRecognizer provides a nice helper.
-    recorder.listen_in_background(source, record_callback, phrase_time_limit=record_timeout)
-
+    recorder.listen_in_background(source, get_record_callback(data_queue), phrase_time_limit=record_timeout)
     # Cue the user that we're ready to go.
+
+    # temp_file = NamedTemporaryFile().name
+    temp_file = Path(__file__).parent / "voice" / "tmp_recording.mp3"
     print("Model loaded.\n")
+    add_text2queue("Figyelek! Jöhetnek a kérdések.")
+    
 
     while True:
         try:
@@ -128,13 +100,13 @@ def main():
                 #     last_sample = bytes()
                 #     phrase_complete = True
                 # This is the last time we received new audio data from the queue.
-                phrase_time = now
+                # phrase_time = now
 
                 # Concatenate our current audio data with the latest audio data.
                 while not data_queue.empty():
                     data = data_queue.get()
                     last_sample += [data]
-                last_sample = last_sample[-30:]
+                last_sample = last_sample[-sound_chunk_threshold:]
                 # concat list of bytes together into one big bytes array
                 full_data = b''.join(last_sample)
 
@@ -143,41 +115,56 @@ def main():
                 # Use AudioData to convert the raw data to wav data.
                 audio_data = sr.AudioData(full_data, source.SAMPLE_RATE, source.SAMPLE_WIDTH)
                 wav_data = io.BytesIO(audio_data.get_wav_data())
-                wav_conversion_time = time() - wav_convert_time
+                # print('wav_conversion_time:', time() - wav_convert_time)
                 # Write wav data to the temporary file as bytes.
+                wav_convert_time = time()
                 with open(temp_file, 'w+b') as f:
                     f.write(wav_data.read())
+                # print(f'wav_write: {time() - wav_convert_time:.2f}', )
 
                 # Read the transcription.
-                text = ""
                 f_time = time()
-                segments, info = audio_model.transcribe(temp_file)
+                BATCH_SIZE=16
+                res = transcribe(temp_file, batch_size=BATCH_SIZE)
                 stt_time = time() - f_time 
-                for segment in segments:
-                    text += segment.text
+                if len(res['segments']) > 1:
+                    print("WHHHHYYYY", [(t["start"], t["end"]) for t in res['segments']])
+                if len(res["segments"]) == 0:
+                    continue
+                text = res['segments'][-1]['text']
+                
                 # print('last_text =', last_text)
-                print('->', find_same_from_end(last_text, text))
+                # print('->', find_same_from_end(last_text, text))
+                print(f"text = '{text}'")
                 llm_time = time()
-                if is_AI_called(text):
+                if len(last_sample) > 4 and is_AI_called_Jarvis(text):
+                    add_text2queue("Egy pillanat.")
+
                     print('YES AI reguested:', )
                     # call openai chatGPT 4 for answer with langchain
-                    # stream_chatgpt(text)
+                    # res = stream_chatgpt_single(text.strip())
+                    res = stream_chatgpt(text.strip())
+                    wait_for_speech_sleep()
+                    if "Silent" != res:
+                        print("We reset what we heard in the meantime!")
+                        last_sample = [] # maybe keep the last sample.
+                        while not data_queue.empty():
+                            data = data_queue.get()
+                    elif len(last_sample) > 5:
+                        last_sample = last_sample[-5:]
                     pass
                 
                 llm_elapsed = time() - llm_time
                 #text = result['text'].strip()
-                print(f"S2T: {stt_time:.2f}s LLM: {llm_elapsed:.2f}s", "" if len(last_sample)>29 else f"{len(last_sample)}/{sound_chunk_threshold}")
+                print(f"STT: {stt_time:.2f}s LLM: {llm_elapsed:.2f}s", "" if len(last_sample)>29 else f"{len(last_sample)}/{sound_chunk_threshold}")
 
                 last_text = text
 
                 # Infinite loops are bad for processors, must sleep.
-                sleep(0.25)
         except KeyboardInterrupt:
             break
+        sleep(0.05)
 
-    print("\n\nTranscription:")
-    for line in transcription:
-        print(line)
 
 
 if __name__ == "__main__":

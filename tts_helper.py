@@ -1,12 +1,14 @@
 #%%
 from pathlib import Path
-from openai import OpenAI
+from construct import max_
+from openai import OpenAI, APIConnectionError
 import queue, os
 import threading
 import subprocess
 import pyaudio
 from time import time, sleep
 from decorators import run_in_thread
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 
 
 # Initialize OpenAI client
@@ -14,12 +16,19 @@ client = OpenAI()
 # Initialize a queue for text data
 text_queue = queue.Queue()
 play_queue = queue.Queue()
+playing_until = 0
+
 
 # talk system initialization flag
 if 'initialized' not in globals():
     initialized = False
 
 @run_in_thread
+@retry(
+    stop=stop_after_attempt(3),  # Stop after 3 attempts
+    wait=wait_fixed(2),  # Wait for 2 seconds between retries
+    retry=retry_if_exception_type(APIConnectionError)  # Retry on APIConnectionError
+)
 def text_to_speech(text, lang='hu'):
     # from gtts import gTTS
     # from io import BytesIO
@@ -44,7 +53,6 @@ def text_to_speech(text, lang='hu'):
     isready.set()
     print("Resp:",time() - tt)
 
-
 def play_audio_with_paplay(file_path, device_name=None):
     command = ['paplay']
 
@@ -59,6 +67,14 @@ def play_audio_with_paplay(file_path, device_name=None):
         print(f"An error occurred while playing audio: {e}")
     remove_file(file_path)
 
+def get_wav_duration(file_path):
+    import wave
+    with wave.open(str(file_path), 'r') as wav_file:
+        frames = wav_file.getnframes()
+        rate = wav_file.getframerate()
+        duration = frames / float(rate)
+        return duration
+
 @run_in_thread
 def remove_file(filepath):
     # remove file on path
@@ -69,6 +85,7 @@ def remove_file(filepath):
         print(f"An error occurred while removing file: {e.filename} - {e.strerror}")
 
 def process_play_queue():
+    global playing_until
     while True:
         if not play_queue.empty():
             wav_path, isready = play_queue.get()
@@ -76,7 +93,16 @@ def process_play_queue():
             play_audio_with_paplay(wav_path, 'Loopback_of_Discord')
         else:
             sleep(0.1)  # Sleep for a bit when the queue is empty
+
+def wait_for_speech_sleep():
+    sleep(1)
+    ms_diff = playing_until - time() + 0.3  # for tolerance a little more.
+    print(f"Sleeping for: {ms_diff:.1f}sec")
+    if ms_diff > 0:
+        sleep(ms_diff)
+
 def process_text_queue():
+    global playing_until
     max_text = ""
     while True:
         if not text_queue.empty():
@@ -84,30 +110,41 @@ def process_text_queue():
             while not text_queue.empty():
                 max_text += text_queue.get()
             # Cut down the unfinished word
+            # replace STEP 1 and STEP 2 and STEP 3: with empty string
+            # replace CASE 1 and CASE 2 and CASE 3: with empty string
+            # also handle : in the end of them
+            max_text = max_text.replace('STEP 1:', '').replace('STEP 2:', '').replace('STEP 3:', '')
+            max_text = max_text.replace('CASE 1:', '').replace('CASE 2:', '').replace('CASE 3:', '')
+            max_text = max_text.replace('STEP 1', '').replace('STEP 2', '').replace('STEP 3', '')
+            max_text = max_text.replace('CASE 1', '').replace('CASE 2', '').replace('CASE 3', '')
             j = 1
-            while not max_text[-j] in [" ", "?", "!", ",", "."]:
+            while j<=len(max_text) and not max_text[-j] in ["?", "!", ",", ".", ":"]: # to only say whole sentences.
                 j += 1
                 if j == len(max_text):
                     break
-            if j == len(max_text):
+            if j >= len(max_text):
                 continue
             
             talk_text = max_text if j == 1 else max_text[:-j+1] 
             max_text = "" if j==1 else max_text[-j+1:]
+            CHAR_PER_SEC = 15 # according to gpt its 12-14
+            playing_until = max(time(), playing_until) + len(talk_text)/CHAR_PER_SEC # we need to know if it is already in the future.
+
             text_to_speech(talk_text)
-            sleep(0.5) 
+            playing_until-time() > 0 and print(f'TTS: Sleep to not preprocess sentences too fast: {playing_until-time():.3f}', )
+            sleep(max(playing_until-time()-0.5, 0.5))
         else:
             sleep(0.1)  # Sleep for a bit when the queue is empty
 
     
-def init_talk_processor():
+def init_talk_processor(force=False):
     global initialized
-    if initialized:
+    if not force and initialized:
         return
     initialized = True
     print('initialized:', initialized)
     # Run the text processing in a separate thread
-    threading.Thread(target=process_text_queue, daemon=True).start()
+    t1 = threading.Thread(target=process_text_queue, daemon=True).start()
     threading.Thread(target=process_play_queue, daemon=True).start()
 
 def add_text2queue(text):
@@ -143,8 +180,8 @@ def list_audio_devices():
         print(f"{i}: {dev['name']}", dev)
     p.terminate()
 
-
 if __name__ == "__main__":
+    add_text2queue("Figyelek! Jöhetnek a kérdések.")
 
     # Example: Adding text data to the queue
     # text_queue.put("Ez egy példaszöveg.")
@@ -159,10 +196,10 @@ if __name__ == "__main__":
     # add_text2queue("érdekes az akcentusa,")
     # sleep(0.1)
     # add_text2queue("viszont legalább tud beszélni.")
-    list_audio_devices()
-    mp3_path = Path(__file__).parent / "voice" / f"speech_1703116391.68.mp3"
-    wav_path = Path(__file__).parent / "voice" / f"speech_1703116391.68.wav"
-    tt = time()
-    play_audio_with_paplay(wav_path, 'Loopback_of_Discord')
+    # list_audio_devices()
+    # mp3_path = Path(__file__).parent / "voice" / f"speech_1703116391.68.mp3"
+    # wav_path = Path(__file__).parent / "voice" / f"speech_1703116391.68.wav"
+    # tt = time()
+    # play_audio_with_paplay(wav_path, 'Loopback_of_Discord')
     # convert_mp3_to_wav(mp3_path, wav_path)
-    print(time() - tt)
+    # print(time() - tt)
